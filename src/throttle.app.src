@@ -1,0 +1,8 @@
+%% -*- erlang -*-
+{application, throttle,
+ [{description, "Throttle control service"},
+  {vsn, "0.0.1"},
+  {modules, []},
+  {registered, [throttle_ets_sup]},
+  {mod, {throttle, []}},
+  {applications, [kernel, stdlib]}]}.
