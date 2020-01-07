@@ -6,3 +6,4 @@ ebin
 doc
 _build
 rebar.*
+.eunit

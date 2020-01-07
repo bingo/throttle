@@ -43,7 +43,7 @@ set_bucket(Key, Capacity, Tokens, Max, Within) ->
     Store:set_bucket(Key, Capacity, Tokens, Max, Within).
 
 -spec take_tokens(Key :: key(),
-		  Number :: non_neg_integer()) -> ok | error.
+		  Number :: non_neg_integer()) -> ok | {error, term()}.
 
 %% @doc Take out numbers of tokens from bucket, 'error' returned if throttled.
 %% @param Key - Key identifier of bucket,

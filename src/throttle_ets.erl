@@ -62,19 +62,20 @@ set_bucket(Key, Capacity, Tokens, Max, Within) ->
     %make sure tokens < capacity, otherwise only capacity tokens set
 
 -spec take_tokens(Key :: key(),
-		  Number :: non_neg_integer()) -> ok | error.
+		  Number :: non_neg_integer()) -> ok | {error, term()}.
 
 %% @doc Take out numbers of tokens from bucket, 'error' returned if throttled.
 %% @param Key - Key identifier of bucket,
 %% @param Number - Numbers of tokens to take out.
 take_tokens(Key, Number) when is_atom(Key) ->
     take_tokens(atom_to_list(Key), Number);
-take_tokens(_Key, Number) when Number < 0 -> error;
+take_tokens(_Key, Number) when Number < 0 ->
+    {error, "Number shoule be larger than zero."};
 take_tokens(Key, Number) ->
     Now = erlang:system_time(millisecond),
     Buckets = ets:lookup(?TABLE, Key),
     case Buckets of
-      [] -> error;
+      [] -> {error, "Key not found."};
       [{Key, C, T, M, W, L, TG}] ->
 	  UpdatedTokens0 = T + (Now - L) * M div W,
 	  % overflow if above Capacity of bucket
@@ -91,7 +92,7 @@ take_tokens(Key, Number) ->
 	    false ->
 		ets:update_element(?TABLE, Key,
 				   [{3, UpdatedTokens}, {6, Now}]),
-		error
+		{error, "Demands not granted."}
 	  end
     end.
 
@@ -106,7 +107,7 @@ reset_bucket(Key) ->
     ets:update_element(?TABLE, Key,
 		       [{3, 0}, {6, Now}, {7, 0}]).
 
--spec query_bucket(Key :: key()) -> not_found |
+-spec query_bucket(Key :: key()) -> {error, term()} |
 				    bucket().
 
 %% @doc Get bucket information in a single call.
@@ -116,7 +117,7 @@ query_bucket(Key) when is_atom(Key) ->
 query_bucket(Key) ->
     Now = erlang:system_time(millisecond),
     case ets:lookup(?TABLE, Key) of
-      [] -> not_found;
+      [] -> {error, "Key not found."};
       [{Key, C, T, M, W, L, TG}] ->
 	  UpdatedTokens0 = T + (Now - L) * M div W,
 	  % overflow if above Capacity of bucket
