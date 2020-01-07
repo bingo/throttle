@@ -1,71 +1,132 @@
 %%%--------------------------------------------------------------------
-%%% @author
+%%% @author bingo.zhao@gmail.com
 %%% @doc Throttle ets storage server.
-%%%      Employ ETS table to store bucket data, though, when server
-%%%      terminated, the ETS table is destroyed.
+%%%
+%%%      Employ ETS table to store bucket data.
 %%% @end
 %%%--------------------------------------------------------------------
 -module(throttle_ets).
--behaviour(gen_server).
+
+-include("throttle.hrl").
 
 %% API
--export([start_link/0, stop/0]).
+-export([init/0, query_bucket/1, reset_bucket/1,
+	 set_bucket/5, take_tokens/2]).
 
-%% gen_server callbacks
--export([init/1]).
--export([handle_call/3]).
--export([handle_cast/2]).
--export([handle_info/2]).
--export([terminate/2]).
--export([code_change/3]).
-
--define(SERVER, ?MODULE).
 -define(TABLE, token_buckets).
-
--record(state, {}).
 
 %%%====================================================================
 %%% API
 %%%====================================================================
+-spec init() -> ok.
 
-%% @private
--spec start_link() -> {ok, pid()}.
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
-
-%% @private
--spec stop() -> stopped.
-stop() ->
-    gen_server:cast(?SERVER, stop).
-
-%%%====================================================================
-%%% gen_server callbacks
-%%%====================================================================
-
-%% @private
-init([]) ->
-    ?TABLE = ets:new(?TABLE, [set, public,
-        named_table, {write_concurrency, true}, {read_concurrency, true}]),
-    {ok, #state{}}.
-
-%% @private
-handle_call(_Request, _From, State) ->
-    {reply, ignored, State}. 
-
-%% @private
-handle_cast(stop, State) ->
-    {stop, normal, State};
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-%% @private
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-%% @private
-terminate(_Reason, _State) ->
+%% @doc Initialize throttle service.
+init() ->
+    ets:new(?TABLE,
+	    [set, public, named_table, {write_concurrency, true},
+	     {read_concurrency, true}]),
     ok.
 
-%% @private
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+-spec set_bucket(Key :: key(),
+		 Capacity :: non_neg_integer(),
+		 Tokens :: non_neg_integer(), Max :: non_neg_integer(),
+		 Within :: non_neg_integer()) -> ok | {error, term()}.
+
+%% @doc Set new/replenish bucket with specified configuration.
+%% @param Key - Key identifier of bucket,
+%% @param Capacity - Bucket capacity, tokens above this would be dropped,
+%% @param Tokens - Init numbers of token preset,
+%% @param Max - Maximum granted tokens in within time,
+%% @param Within - Within time in millisecond.
+set_bucket(Key, Capacity, Tokens, Max, Within)
+    when is_atom(Key) ->
+    set_bucket(atom_to_list(Key), Capacity, Tokens, Max,
+	       Within);
+set_bucket(_, _, Tokens, _, _) when Tokens < 0 ->
+    {error, "Tokens should be non-negative integer."};
+set_bucket(_, Capacity, _, Max, Within)
+    when Capacity =< 0 orelse Max =< 0 orelse Within =< 0 ->
+    {error,
+     "Capacity/Max/Within should be larger "
+     "than zero."};
+set_bucket(Key, Capacity, Tokens, Max, Within) ->
+    Now = erlang:system_time(millisecond),
+    Tokens0 = case Capacity < Tokens of
+		true -> Capacity;
+		false -> Tokens
+	      end,
+    ets:insert(?TABLE,
+	       {Key, Capacity, Tokens0, Max, Within, Now, 0}),
+    ok.
+
+    %make sure tokens < capacity, otherwise only capacity tokens set
+
+-spec take_tokens(Key :: key(),
+		  Number :: non_neg_integer()) -> ok | error.
+
+%% @doc Take out numbers of tokens from bucket, 'error' returned if throttled.
+%% @param Key - Key identifier of bucket,
+%% @param Number - Numbers of tokens to take out.
+take_tokens(Key, Number) when is_atom(Key) ->
+    take_tokens(atom_to_list(Key), Number);
+take_tokens(_Key, Number) when Number < 0 -> error;
+take_tokens(Key, Number) ->
+    Now = erlang:system_time(millisecond),
+    Buckets = ets:lookup(?TABLE, Key),
+    case Buckets of
+      [] -> error;
+      [{Key, C, T, M, W, L, TG}] ->
+	  UpdatedTokens0 = T + (Now - L) * M div W,
+	  % overflow if above Capacity of bucket
+	  UpdatedTokens = case UpdatedTokens0 > C of
+			    true -> C;
+			    false -> UpdatedTokens0
+			  end,
+	  case Number =< UpdatedTokens of
+	    true ->
+		ets:update_element(?TABLE, Key,
+				   [{3, UpdatedTokens - Number}, {6, Now},
+				    {7, TG + Number}]),
+		ok;
+	    false ->
+		ets:update_element(?TABLE, Key,
+				   [{3, UpdatedTokens}, {6, Now}]),
+		error
+	  end
+    end.
+
+-spec reset_bucket(Key :: key()) -> ok.
+
+%% @doc Reset bucket to remove all existing tokens in it.
+%% @param Key - Key identifier of bucket.
+reset_bucket(Key) when is_atom(Key) ->
+    reset_bucket(atom_to_list(Key));
+reset_bucket(Key) ->
+    Now = erlang:system_time(millisecond),
+    ets:update_element(?TABLE, Key,
+		       [{3, 0}, {6, Now}, {7, 0}]).
+
+-spec query_bucket(Key :: key()) -> not_found |
+				    bucket().
+
+%% @doc Get bucket information in a single call.
+%% @param Key - Key identifier of bucket.
+query_bucket(Key) when is_atom(Key) ->
+    query_bucket(atom_to_list(Key));
+query_bucket(Key) ->
+    Now = erlang:system_time(millisecond),
+    case ets:lookup(?TABLE, Key) of
+      [] -> not_found;
+      [{Key, C, T, M, W, L, TG}] ->
+	  UpdatedTokens0 = T + (Now - L) * M div W,
+	  % overflow if above Capacity of bucket
+	  UpdatedTokens = case UpdatedTokens0 > C of
+			    true -> C;
+			    false -> UpdatedTokens0
+			  end,
+	  ets:update_element(?TABLE, Key,
+			     [{3, UpdatedTokens}, {6, Now}]),
+	  #bucket{key = Key, capacity = C, tokens = UpdatedTokens,
+		  last_time = Now, max = M, within = W,
+		  total_granted = TG}
+    end.

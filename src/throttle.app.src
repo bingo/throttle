@@ -2,7 +2,11 @@
 {application, throttle,
  [{description, "Throttle control service"},
   {vsn, "0.0.1"},
-  {modules, []},
-  {registered, [throttle_ets_sup]},
-  {mod, {throttle, []}},
-  {applications, [kernel, stdlib]}]}.
+  {modules, [throttle, throttle_ets]},
+  {registered, []},
+  {applications, [kernel, stdlib]},
+  {env,[{store,throttle_ets},
+        {capacity,1000},
+        {init,0},
+        {max,100},
+        {within,1000}]}]}.

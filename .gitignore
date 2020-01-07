@@ -3,3 +3,6 @@
 ebin
 *.beam
 .rebar
+doc
+_build
+rebar.*
