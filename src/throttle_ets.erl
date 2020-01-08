@@ -23,7 +23,7 @@
 %% @doc Initialize throttle service.
 init() ->
     ets:new(?TABLE,
-	    [set, public, named_table, {write_concurrency, true},
+	    [set, private, named_table, {write_concurrency, true},
 	     {read_concurrency, true}]),
     ok.
 
