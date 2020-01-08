@@ -12,28 +12,29 @@ set_bucket_test() ->
     ok = throttle:set_bucket(a, 10, 1, 1, 1000).
 
 set_bucket_negative_capacity_test() ->
-    {error,
-     "Capacity/Max/Within should be larger "
-     "than zero."} =
-	throttle:set_bucket(a, -10, 0, 1, 1000).
+    {error, neg_zero_params} = throttle:set_bucket(a, -10,
+						   0, 1, 1000).
 
 set_bucket_0_tokens_test() ->
-    {error, "Tokens should be non-negative integer."} =
-	throttle:set_bucket(a, 10, -1, 1, 1000).
+    {error, neg_tokens} = throttle:set_bucket(a, 10, -1, 1,
+					      1000).
 
 take_tokens_ok_test() ->
     ok = throttle:take_tokens(a, 1).
 
 take_tokens_negative_numbers_test() ->
-    {error, "Number shoule be larger than zero."} =
-	throttle:take_tokens(a, -1).
+    {error, neg_number} = throttle:take_tokens(a, -1).
 
 take_tokens_not_granted_test() ->
-    {error, "Demands not granted."} =
-	throttle:take_tokens(a, 100).
+    {error, not_granted} = throttle:take_tokens(a, 100).
 
 take_tokens_key_not_found_test() ->
-    {error, "Key not found."} = throttle:take_tokens(b, 10).
+    {error, not_found} = throttle:take_tokens(b, 10).
+
+reset_bucket_test() -> ok = throttle:reset_bucket(a).
+
+reset_bucket_not_found_test() ->
+    {error, not_found} = throttle:reset_bucket(b).
 
 query_bucket_test() ->
     #bucket{key = K, capacity = C, tokens = T, max = M,
@@ -44,7 +45,7 @@ query_bucket_test() ->
     T = 0,
     M = 1,
     W = 1000,
-    TG = 1.
+    TG = 0.
 
 query_bucket_key_not_found_test() ->
-    {error, "Key not found."} = throttle:query_bucket(b).
+    {error, not_found} = throttle:query_bucket(b).
